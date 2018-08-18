@@ -223,6 +223,10 @@ static struct config {
     int verbose;
     clusterManagerCommand cluster_manager_command;
     int no_auth_warning;
+	
+	char *last_cmd;
+	int pretty;
+	int color;	
 } config;
 
 /* User preferences. */
@@ -795,6 +799,146 @@ static void cliPrintContextError(void) {
     fprintf(stderr,"Error: %s\n",context->errstr);
 }
 
+static sds cliFormatReplyTTY(redisReply *r, char *prefix);
+
+#define COLOR_RED 31
+#define COLOR_GREEN 32
+#define COLOR_YELLOW 33
+#define COLOR_BLUE 34
+#define COLOR_MAGENTA 35
+#define COLOR_CYAN 36
+#define COLOR_WHITE 37
+
+#define COLOR_LIST			COLOR_YELLOW
+#define COLOR_HASH_KEY		COLOR_CYAN
+#define COLOR_HASH_VALUE	COLOR_GREEN
+#define COLOR_SET			COLOR_BLUE
+#define COLOR_ZSET			COLOR_RED
+
+static char *cliColorful(int color, int bold, char *s) {
+	char *o = sdsnew("");
+	o = sdscatfmt(o,"\033[%i;%i;49m",bold,color);
+    o = sdscat(o,s);
+    o = sdscat(o,"\033[0m");
+	return o;
+}
+
+static char *cliAutoColorful(char *s) {
+	int bold = 0;
+	int color = 0;	
+	switch (config.last_cmd[0]) {
+		case 'L':
+		case 'l':
+			color = COLOR_LIST;
+			break;
+		case 'S':
+		case 's':
+			color = COLOR_SET;
+			break;
+		case 'Z':
+		case 'z':
+			color = COLOR_ZSET;
+			break;
+	}
+	if (color == 0)
+		return s;
+	char *o = sdsnew("");
+	o = sdscatfmt(o,"\033[%i;%i;49m",bold,color);
+    o = sdscat(o,s);
+    o = sdscat(o,"\033[0m");
+	return o;
+}
+
+static char *cliFormatReplyArrayTTY(redisReply* r, char *out, char *prefix) {
+    if (r->elements == 0) {
+        out = sdscat(out,"(empty list or set)\n");
+    } else {
+        unsigned int i, idxlen = 0;
+        char _prefixlen[16];
+        char _prefixfmt[16];
+        sds _prefix;
+        sds tmp;
+
+        /* Calculate chars needed to represent the largest index */
+        i = r->elements;
+        do {
+            idxlen++;
+            i /= 10;
+        } while(i);
+
+        /* Prefix for nested multi bulks should grow with idxlen+2 spaces */
+        memset(_prefixlen,' ',idxlen+2);
+        _prefixlen[idxlen+2] = '\0';
+        _prefix = sdscat(sdsnew(prefix),_prefixlen);
+
+        /* Setup prefix format for every entry */
+        snprintf(_prefixfmt,sizeof(_prefixfmt),"%%s%%%ud) ",idxlen);
+
+        for (i = 0; i < r->elements; i++) {
+            /* Don't use the prefix for the first element, as the parent
+             * caller already prepended the index number. */
+            out = sdscatprintf(out,_prefixfmt,i == 0 ? "" : prefix,i+1);			
+
+            /* Format the multi bulk entry */
+            tmp = cliFormatReplyTTY(r->element[i],_prefix);
+            out = sdscatlen(out,tmp,sdslen(tmp));
+            sdsfree(tmp);
+        }
+        sdsfree(_prefix);
+    }
+	return out;
+}
+
+static char *cliPrettyFormatReplyArrayTTY(redisReply *r, char *out, char *prefix) {
+    if (r->elements == 0) {
+        out = sdscat(out,"(empty list or set)\n");
+    } else {
+        unsigned int i, idxlen = 0;
+        char _prefixlen[16];
+        char _prefixfmt[16];
+        sds _prefix;
+        sds tmp;
+
+        /* Calculate chars needed to represent the largest index */
+        i = r->elements / 2;
+        do {
+            idxlen++;
+            i /= 10;
+        } while(i);
+
+        /* Prefix for nested multi bulks should grow with idxlen+2 spaces */
+        memset(_prefixlen,' ',idxlen+2);
+        _prefixlen[idxlen+2] = '\0';
+        _prefix = sdscat(sdsnew(prefix),_prefixlen);
+
+        /* Setup prefix format for every entry */
+        snprintf(_prefixfmt,sizeof(_prefixfmt),"%%s%%%ud) ",idxlen);
+
+        for (i = 0; i < r->elements; i++) {
+            /* Format the multi bulk entry */
+            tmp = cliFormatReplyTTY(r->element[i],_prefix);
+			
+            /* Don't use the prefix for the first element, as the parent
+             * caller already prepended the index number. */
+            if (0 == i%2) {			
+	            out = sdscatprintf(out,_prefixfmt,i == 0 ? "" : prefix, i/2+1);
+				tmp[sdslen(tmp)-1] = '\0';
+				if (config.color) 
+					tmp = cliColorful(COLOR_HASH_KEY, 0, tmp);
+            } else {
+				out = sdscat(out," => ");				
+				if (config.color) 
+					tmp = cliColorful(COLOR_HASH_VALUE, 0, tmp);
+            }
+
+            out = sdscatlen(out,tmp,sdslen(tmp));
+            sdsfree(tmp);
+        }
+        sdsfree(_prefix);
+    }
+	return out;
+}
+
 static sds cliFormatReplyTTY(redisReply *r, char *prefix) {
     sds out = sdsempty();
     switch (r->type) {
@@ -818,47 +962,17 @@ static sds cliFormatReplyTTY(redisReply *r, char *prefix) {
         out = sdscat(out,"(nil)\n");
     break;
     case REDIS_REPLY_ARRAY:
-        if (r->elements == 0) {
-            out = sdscat(out,"(empty list or set)\n");
-        } else {
-            unsigned int i, idxlen = 0;
-            char _prefixlen[16];
-            char _prefixfmt[16];
-            sds _prefix;
-            sds tmp;
-
-            /* Calculate chars needed to represent the largest index */
-            i = r->elements;
-            do {
-                idxlen++;
-                i /= 10;
-            } while(i);
-
-            /* Prefix for nested multi bulks should grow with idxlen+2 spaces */
-            memset(_prefixlen,' ',idxlen+2);
-            _prefixlen[idxlen+2] = '\0';
-            _prefix = sdscat(sdsnew(prefix),_prefixlen);
-
-            /* Setup prefix format for every entry */
-            snprintf(_prefixfmt,sizeof(_prefixfmt),"%%s%%%ud) ",idxlen);
-
-            for (i = 0; i < r->elements; i++) {
-                /* Don't use the prefix for the first element, as the parent
-                 * caller already prepended the index number. */
-                out = sdscatprintf(out,_prefixfmt,i == 0 ? "" : prefix,i+1);
-
-                /* Format the multi bulk entry */
-                tmp = cliFormatReplyTTY(r->element[i],_prefix);
-                out = sdscatlen(out,tmp,sdslen(tmp));
-                sdsfree(tmp);
-            }
-            sdsfree(_prefix);
-        }
+		if (config.last_cmd[0] == 'h' && strcmp(config.last_cmd, "help") && config.pretty) {
+			out = cliPrettyFormatReplyArrayTTY(r, out, prefix);
+		} else {
+			out = cliFormatReplyArrayTTY(r, out, prefix);
+		}
     break;
     default:
         fprintf(stderr,"Unknown reply type: %d\n", r->type);
         exit(1);
     }
+	out = cliAutoColorful(out);
     return out;
 }
 
@@ -1085,6 +1199,7 @@ static int cliSendCommand(int argc, char **argv, long repeat) {
     }
 
     if (context == NULL) return REDIS_ERR;
+	config.last_cmd = command;
 
     output_raw = 0;
     if (!strcasecmp(command,"info") ||
@@ -1389,6 +1504,10 @@ static int parseOptions(int argc, char **argv) {
             printf("redis-cli %s\n", version);
             sdsfree(version);
             exit(0);
+        }  else if (!strcmp(argv[i],"--pretty")) {
+            config.pretty = 1;
+        }  else if (!strcmp(argv[i],"--color")) {
+            config.color = 1;
         } else if (CLUSTER_MANAGER_MODE() && argv[i][0] != '-') {
             if (config.cluster_manager_command.argc == 0) {
                 int j = i + 1;
@@ -1501,6 +1620,8 @@ static void usage(void) {
 "  --verbose          Verbose mode.\n"
 "  --no-auth-warning  Don't show warning message when using password on command\n"
 "                     line interface.\n"
+"  --pretty           Use pretty formatting for replies print.\n"
+"  --color  		  Use colorful formatting for replies print.\n"
 "  --help             Output this help and exit.\n"
 "  --version          Output version and exit.\n"
 "\n",
@@ -6625,6 +6746,8 @@ int main(int argc, char **argv) {
     config.cluster_manager_command.pipeline = CLUSTER_MANAGER_MIGRATE_PIPELINE;
     config.cluster_manager_command.threshold =
         CLUSTER_MANAGER_REBALANCE_THRESHOLD;
+	config.pretty = 0;
+	config.color = 0;
     pref.hints = 1;
 
     spectrum_palette = spectrum_palette_color;
