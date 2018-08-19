@@ -827,6 +827,10 @@ static char *cliAutoColorful(char *s) {
 	int bold = 0;
 	int color = 0;	
 	switch (config.last_cmd[0]) {
+		case 'H':
+		case 'h':
+			color = COLOR_HASH_KEY;
+			break;
 		case 'L':
 		case 'l':
 			color = COLOR_LIST;
@@ -881,6 +885,8 @@ static char *cliFormatReplyArrayTTY(redisReply* r, char *out, char *prefix) {
 
             /* Format the multi bulk entry */
             tmp = cliFormatReplyTTY(r->element[i],_prefix);
+			if (config.color)
+				tmp = cliAutoColorful(tmp);
             out = sdscatlen(out,tmp,sdslen(tmp));
             sdsfree(tmp);
         }
@@ -972,7 +978,6 @@ static sds cliFormatReplyTTY(redisReply *r, char *prefix) {
         fprintf(stderr,"Unknown reply type: %d\n", r->type);
         exit(1);
     }
-	out = cliAutoColorful(out);
     return out;
 }
 
