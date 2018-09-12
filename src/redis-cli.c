@@ -227,6 +227,7 @@ static struct config {
 	char *last_cmd;
 	int pretty;
 	int color;	
+	int json;
 } config;
 
 /* User preferences. */
@@ -853,6 +854,39 @@ static char *cliAutoColorful(char *s) {
 	return o;
 }
 
+static sds cliFormatReplyStringFromJson(sds out, size_t len) {
+	sds format = sdsempty();
+	size_t i, j;
+	int isJson = 0;
+	int tabNum = 0, k;
+	for (i = 0, j = 0; i < len; i++) {
+		if ((out[i] == '{') || (out[i] == '[') || (out[i] == ',')) {
+			if (!((out[i] == ',') && ((out[i-1] == '}') || (out[i-1] == ']')))) {
+				for (k = 0; k < tabNum; k++)
+					format = sdscatlen(format, "  ", 2);
+			}
+			format = sdscatlen(format, &out[j], i-j+1);
+			format = sdscatlen(format, "\n", 1);
+			j = i+1;
+			isJson = 1;
+			if (out[i] != ',')
+				tabNum += 1;
+		} else if ((out[i] == '}') || (out[i] == ']')) {
+			for (k = 0; k < tabNum; k++)
+				format = sdscatlen(format, "  ", 2);
+			format = sdscatlen(format, &out[j], i-j);
+			format = sdscatlen(format, "\n", 1);
+			tabNum -= 1;
+			for (k = 0; k < tabNum; k++)
+				format = sdscatlen(format, "  ", 2);
+			format = sdscatlen(format, &out[i], 1);
+			j = i+1;
+			isJson = 1;
+		}
+	}
+	return isJson ? format : out;
+}
+
 static char *cliFormatReplyArrayTTY(redisReply* r, char *out, char *prefix) {
     if (r->elements == 0) {
         out = sdscat(out,"(empty list or set)\n");
@@ -958,11 +992,15 @@ static sds cliFormatReplyTTY(redisReply *r, char *prefix) {
     case REDIS_REPLY_INTEGER:
         out = sdscatprintf(out,"(integer) %lld\n",r->integer);
     break;
-    case REDIS_REPLY_STRING:
-        /* If you are producing output for the standard output we want
-        * a more interesting output with quoted characters and so forth */
-        out = sdscatrepr(out,r->str,r->len);
-        out = sdscat(out,"\n");
+	case REDIS_REPLY_STRING:
+		if (config.json) {
+				out = cliFormatReplyStringFromJson(r->str,r->len);
+		} else {
+			/* If you are producing output for the standard output we want
+			* a more interesting output with quoted characters and so forth */
+			out = sdscatrepr(out,r->str,r->len);
+		}
+		out = sdscat(out,"\n");
     break;
     case REDIS_REPLY_NIL:
         out = sdscat(out,"(nil)\n");
@@ -1093,7 +1131,10 @@ static sds cliFormatReplyRaw(redisReply *r) {
                 out = sdsCatColorizedLdbReply(out,r->str,r->len);
             }
         } else {
-            out = sdscatlen(out,r->str,r->len);
+			if (config.json)
+				out = cliFormatReplyStringFromJson(r->str,r->len);
+			else
+				out = sdscatlen(out,r->str,r->len);
         }
         break;
     case REDIS_REPLY_INTEGER:
@@ -1550,7 +1591,9 @@ static int parseOptions(int argc, char **argv) {
             config.pretty = 1;
         }  else if (!strcmp(argv[i],"--color")) {
             config.color = 1;
-        } else if (CLUSTER_MANAGER_MODE() && argv[i][0] != '-') {
+        } else if (!strcmp(argv[i],"--json")) {
+			config.json = 1;
+		} else if (CLUSTER_MANAGER_MODE() && argv[i][0] != '-') {
             if (config.cluster_manager_command.argc == 0) {
                 int j = i + 1;
                 while (j < argc && argv[j][0] != '-') j++;
@@ -1664,6 +1707,7 @@ static void usage(void) {
 "                     line interface.\n"
 "  --pretty           Use pretty formatting for replies print.\n"
 "  --color  		  Use colorful formatting for replies print.\n"
+"  --json   		  Use json formatting for replies print.\n"
 "  --help             Output this help and exit.\n"
 "  --version          Output version and exit.\n"
 "\n",
@@ -6790,6 +6834,7 @@ int main(int argc, char **argv) {
         CLUSTER_MANAGER_REBALANCE_THRESHOLD;
 	config.pretty = 0;
 	config.color = 0;
+	config.json = 0;
     pref.hints = 1;
 
     spectrum_palette = spectrum_palette_color;
