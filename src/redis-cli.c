@@ -928,7 +928,7 @@ static char *cliPrettyFormatReplyArrayTTY(redisReply *r, char *out, char *prefix
              * caller already prepended the index number. */
             if (0 == i%2) {			
 	            out = sdscatprintf(out,_prefixfmt,i == 0 ? "" : prefix, i/2+1);
-				tmp[sdslen(tmp)-1] = '\0';
+				tmp[sdslen(tmp)-1] = '\0';				
 				if (config.color) 
 					tmp = cliColorful(COLOR_HASH_KEY, 0, tmp);
             } else {
@@ -1025,9 +1025,47 @@ sds sdsCatColorizedLdbReply(sds o, char *s, size_t len) {
     return sdscatcolor(o,s,len,color);
 }
 
-static sds cliFormatReplyRaw(redisReply *r) {
-    sds out = sdsempty(), tmp;
+static sds cliFormatReplyRaw(redisReply *r) ;
+
+static sds cliPrettyFormatReplyArrayRaw(redisReply *r, sds out) {
+    sds tmp = sdsempty();
     size_t i;
+	for (i = 0; i < r->elements; i++) {
+		if (i > 0) {
+			if (i%2 == 0)
+				out = sdscat(out,config.mb_delim);
+			else
+				out = sdscat(out," => ");
+		}
+		tmp = cliFormatReplyRaw(r->element[i]);
+		if (config.color) {
+			if (i%2 == 0)
+				tmp = cliColorful(COLOR_HASH_KEY, 0, tmp);
+			else 
+				tmp = cliColorful(COLOR_HASH_VALUE, 0, tmp);
+		}
+		out = sdscatlen(out,tmp,sdslen(tmp));
+		sdsfree(tmp);
+	}
+	return out;
+}
+
+static sds cliFormatReplyArrayRaw(redisReply *r, sds out) {
+    sds tmp = sdsempty();
+    size_t i;
+	for (i = 0; i < r->elements; i++) {
+		if (i > 0) out = sdscat(out,config.mb_delim);
+		tmp = cliFormatReplyRaw(r->element[i]);
+		if (config.color)
+			tmp = cliAutoColorful(tmp);
+		out = sdscatlen(out,tmp,sdslen(tmp));
+		sdsfree(tmp);
+	}
+	return out;
+}
+
+static sds cliFormatReplyRaw(redisReply *r) {
+    sds out = sdsempty();
 
     switch (r->type) {
     case REDIS_REPLY_NIL:
@@ -1062,12 +1100,11 @@ static sds cliFormatReplyRaw(redisReply *r) {
         out = sdscatprintf(out,"%lld",r->integer);
         break;
     case REDIS_REPLY_ARRAY:
-        for (i = 0; i < r->elements; i++) {
-            if (i > 0) out = sdscat(out,config.mb_delim);
-            tmp = cliFormatReplyRaw(r->element[i]);
-            out = sdscatlen(out,tmp,sdslen(tmp));
-            sdsfree(tmp);
-        }
+		if (config.last_cmd[0] == 'h' && strcmp(config.last_cmd, "help") && config.pretty) {
+			out = cliPrettyFormatReplyArrayRaw(r, out);
+		} else {
+			out = cliFormatReplyArrayRaw(r, out);
+		}
         break;
     default:
         fprintf(stderr,"Unknown reply type: %d\n", r->type);
