@@ -855,6 +855,8 @@ static char *cliAutoColorful(char *s) {
 }
 
 static sds cliFormatReplyStringFromJson(sds out, sds str, size_t len) {
+    const int TAB_SPACE = 4;
+    const char *tab_space_str = "    ";
 	size_t i, j;
 	int tabNum = 0, k;
     if (str[0] != '{') {
@@ -865,21 +867,21 @@ static sds cliFormatReplyStringFromJson(sds out, sds str, size_t len) {
 		if ((str[i] == '{') || (str[i] == '[') || (str[i] == ',')) {
 			if (!((str[i] == ',') && ((str[i-1] == '}') || (str[i-1] == ']')))) {
 				for (k = 0; k < tabNum; k++)
-					out = sdscatlen(out, "  ", 2);
+					out = sdscatlen(out, tab_space_str, TAB_SPACE);
 			}
 			out = sdscatlen(out, &str[j], i-j+1);
 			out = sdscatlen(out, "\n", 1);
 			j = i+1;
 			if (str[i] != ',')
 				tabNum += 1;
-		} else if ((str[i] == '}') || (out[i] == ']')) {
-			for (k = 0; k < tabNum; k++)
-				out = sdscatlen(out, "  ", 2);
+		} else if ((str[i] == '}') || (str[i] == ']')) {
+            for (k = 0; k < tabNum; k++)
+                out = sdscatlen(out, tab_space_str, TAB_SPACE);
 			out = sdscatlen(out, &str[j], i-j);
 			out = sdscatlen(out, "\n", 1);
 			tabNum -= 1;
 			for (k = 0; k < tabNum; k++)
-				out = sdscatlen(out, "  ", 2);
+				out = sdscatlen(out, tab_space_str, TAB_SPACE);
 			out = sdscatlen(out, &str[i], 1);
 			j = i+1;
 		}
