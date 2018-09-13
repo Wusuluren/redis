@@ -854,37 +854,37 @@ static char *cliAutoColorful(char *s) {
 	return o;
 }
 
-static sds cliFormatReplyStringFromJson(sds out, size_t len) {
-	sds format = sdsempty();
+static sds cliFormatReplyStringFromJson(sds out, sds str, size_t len) {
 	size_t i, j;
-	int isJson = 0;
 	int tabNum = 0, k;
+    if (str[0] != '{') {
+        out = sdscatrepr(out, str, len);
+        return out;
+    }
 	for (i = 0, j = 0; i < len; i++) {
-		if ((out[i] == '{') || (out[i] == '[') || (out[i] == ',')) {
-			if (!((out[i] == ',') && ((out[i-1] == '}') || (out[i-1] == ']')))) {
+		if ((str[i] == '{') || (str[i] == '[') || (str[i] == ',')) {
+			if (!((str[i] == ',') && ((str[i-1] == '}') || (str[i-1] == ']')))) {
 				for (k = 0; k < tabNum; k++)
-					format = sdscatlen(format, "  ", 2);
+					out = sdscatlen(out, "  ", 2);
 			}
-			format = sdscatlen(format, &out[j], i-j+1);
-			format = sdscatlen(format, "\n", 1);
+			out = sdscatlen(out, &str[j], i-j+1);
+			out = sdscatlen(out, "\n", 1);
 			j = i+1;
-			isJson = 1;
-			if (out[i] != ',')
+			if (str[i] != ',')
 				tabNum += 1;
-		} else if ((out[i] == '}') || (out[i] == ']')) {
+		} else if ((str[i] == '}') || (out[i] == ']')) {
 			for (k = 0; k < tabNum; k++)
-				format = sdscatlen(format, "  ", 2);
-			format = sdscatlen(format, &out[j], i-j);
-			format = sdscatlen(format, "\n", 1);
+				out = sdscatlen(out, "  ", 2);
+			out = sdscatlen(out, &str[j], i-j);
+			out = sdscatlen(out, "\n", 1);
 			tabNum -= 1;
 			for (k = 0; k < tabNum; k++)
-				format = sdscatlen(format, "  ", 2);
-			format = sdscatlen(format, &out[i], 1);
+				out = sdscatlen(out, "  ", 2);
+			out = sdscatlen(out, &str[i], 1);
 			j = i+1;
-			isJson = 1;
 		}
 	}
-	return isJson ? format : out;
+	return out;
 }
 
 static char *cliFormatReplyArrayTTY(redisReply* r, char *out, char *prefix) {
@@ -994,7 +994,7 @@ static sds cliFormatReplyTTY(redisReply *r, char *prefix) {
     break;
 	case REDIS_REPLY_STRING:
 		if (config.json) {
-				out = cliFormatReplyStringFromJson(r->str,r->len);
+				out = cliFormatReplyStringFromJson(out,r->str,r->len);
 		} else {
 			/* If you are producing output for the standard output we want
 			* a more interesting output with quoted characters and so forth */
@@ -1132,7 +1132,7 @@ static sds cliFormatReplyRaw(redisReply *r) {
             }
         } else {
 			if (config.json)
-				out = cliFormatReplyStringFromJson(r->str,r->len);
+				out = cliFormatReplyStringFromJson(out,r->str,r->len);
 			else
 				out = sdscatlen(out,r->str,r->len);
         }
