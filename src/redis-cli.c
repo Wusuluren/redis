@@ -228,6 +228,7 @@ static struct config {
 	int pretty;
 	int color;	
 	int json;
+	int safe;
 } config;
 
 /* User preferences. */
@@ -1595,6 +1596,8 @@ static int parseOptions(int argc, char **argv) {
             config.color = 1;
         } else if (!strcmp(argv[i],"--json")) {
 			config.json = 1;
+		}  else if (!strcmp(argv[i],"--safe")) {
+			config.safe = 1;
 		} else if (CLUSTER_MANAGER_MODE() && argv[i][0] != '-') {
             if (config.cluster_manager_command.argc == 0) {
                 int j = i + 1;
@@ -1757,8 +1760,53 @@ static char **convertToSds(int count, char** args) {
   return sds;
 }
 
+static char** checkCommandSafety(int argc, char **argv, int *safe_argc) {
+    if (argc == 0)
+        return argv;
+    if (!strcmp(argv[0], "keys")) {
+        if (argc == 1) {
+            *safe_argc = 2;
+            argv = sds_malloc(sizeof(sds) * (*safe_argc));
+            argv[0] = sdsnew("scan");
+            argv[1] = sdsnew("0");
+        } else {
+            *safe_argc = 4;
+            sds pattern = sdsnew(argv[1]);
+            argv = sds_malloc(sizeof(sds) * (*safe_argc));
+            argv[0] = sdsnew("scan");
+            argv[1] = sdsnew("0");
+            argv[2] = sdsnew("match");
+            argv[3] = pattern;
+        }
+    }
+    if (!strcmp(argv[0], "smembers")) {
+        if (argc == 1)
+            return argv;
+        *safe_argc = 3;
+        sds key = sdsnew(argv[1]);
+        argv = sds_malloc(sizeof(sds) * (*safe_argc));
+        argv[0] = sdsnew("sscan");
+        argv[1] = key;
+        argv[2] = sdsnew("0");
+    }
+    if (!strcmp(argv[0], "hgetall")) {
+        if (argc == 1)
+            return argv;
+        *safe_argc = 3;
+        sds key = sdsnew(argv[1]);
+        argv = sds_malloc(sizeof(sds) * (*safe_argc));
+        argv[0] = sdsnew("hscan");
+        argv[1] = key;
+        argv[2] = sdsnew("0");
+    }
+    return argv;
+}
+
 static int issueCommandRepeat(int argc, char **argv, long repeat) {
     while (1) {
+        if (config.safe)
+            argv = checkCommandSafety(argc, argv, &argc);
+
         config.cluster_reissue_command = 0;
         if (cliSendCommand(argc,argv,repeat) != REDIS_OK) {
             cliConnect(CC_FORCE);
@@ -6837,6 +6885,7 @@ int main(int argc, char **argv) {
 	config.pretty = 0;
 	config.color = 0;
 	config.json = 0;
+	config.safe = 0;
     pref.hints = 1;
 
     spectrum_palette = spectrum_palette_color;
