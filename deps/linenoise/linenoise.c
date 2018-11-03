@@ -148,6 +148,8 @@ struct linenoiseState {
     size_t cols;        /* Number of columns in terminal. */
     size_t maxrows;     /* Maximum num of rows used so far (multiline mode) */
     int history_index;  /* The history index we are currently editing. */
+    char *zbuf;         /* Edited line buffer. */
+    int zindex;
 };
 
 enum KEY_ACTION{
@@ -699,22 +701,50 @@ void linenoiseEditMoveEnd(struct linenoiseState *l) {
 #define LINENOISE_HISTORY_PREV 1
 void linenoiseEditHistoryNext(struct linenoiseState *l, int dir) {
     if (history_len > 1) {
-        /* Update the current history entry before to
-         * overwrite it with the next one. */
-        free(history[history_len - 1 - l->history_index]);
-        history[history_len - 1 - l->history_index] = strdup(l->buf);
-        /* Show the new entry */
-        l->history_index += (dir == LINENOISE_HISTORY_PREV) ? 1 : -1;
-        if (l->history_index < 0) {
-            l->history_index = 0;
-            return;
-        } else if (l->history_index >= history_len) {
-            l->history_index = history_len-1;
-            return;
+        if (strlen(l->buf) == 0) {
+            /* Update the current history entry before to
+            * overwrite it with the next one. */
+            free(history[history_len - 1 - l->history_index]);
+            history[history_len - 1 - l->history_index] = strdup(l->buf);
+            /* Show the new entry */
+            l->history_index += (dir == LINENOISE_HISTORY_PREV) ? 1 : -1;
+            if (l->history_index < 0) {
+                l->history_index = 0;
+                return;
+            } else if (l->history_index >= history_len) {
+                l->history_index = history_len-1;
+                return;
+            }
+            strncpy(l->buf,history[history_len - 1 - l->history_index],l->buflen);
+            l->buf[l->buflen-1] = '\0';
+            l->len = l->pos = strlen(l->buf);
+        } else {
+            int cur_buf_len = strlen(l->zbuf);
+            int cur_history_index = 0;
+            int old_zindex = l->zindex;
+            if (dir == LINENOISE_HISTORY_PREV) {
+                for (cur_history_index = old_zindex+1; cur_history_index != old_zindex; cur_history_index++) {
+                    if (cur_history_index >= history_len)
+                        cur_history_index = 0;
+                    if (strncmp(l->zbuf, history[cur_history_index], cur_buf_len) == 0) {
+                        l->zindex = cur_history_index;
+                        break;
+                    }
+                }
+            } else if (dir == LINENOISE_HISTORY_NEXT) {
+                for (cur_history_index = old_zindex-1; cur_history_index != old_zindex; cur_history_index--) {
+                    if (cur_history_index < 0)
+                        cur_history_index = history_len-1;
+                    if (strncmp(l->zbuf, history[cur_history_index], cur_buf_len) == 0) {
+                        l->zindex = cur_history_index;
+                        break;
+                    }
+                }
+            }
+            strncpy(l->buf,history[cur_history_index],l->buflen);
+            l->buf[l->buflen-1] = '\0';
+            l->len = l->pos = strlen(l->buf);
         }
-        strncpy(l->buf,history[history_len - 1 - l->history_index],l->buflen);
-        l->buf[l->buflen-1] = '\0';
-        l->len = l->pos = strlen(l->buf);
         refreshLine(l);
     }
 }
@@ -774,6 +804,7 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
     l.ifd = stdin_fd;
     l.ofd = stdout_fd;
     l.buf = buf;
+    l.zbuf = (char *)malloc(LINENOISE_MAX_LINE);
     l.buflen = buflen;
     l.prompt = prompt;
     l.plen = strlen(prompt);
@@ -920,6 +951,8 @@ static int linenoiseEdit(int stdin_fd, int stdout_fd, char *buf, size_t buflen, 
             break;
         default:
             if (linenoiseEditInsert(&l,c)) return -1;
+            strncpy(l.zbuf, l.buf, strlen(l.buf));
+            l.zindex = 0;
             break;
         case CTRL_U: /* Ctrl+u, delete the whole line. */
             buf[0] = '\0';
