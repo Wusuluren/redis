@@ -722,12 +722,14 @@ void linenoiseEditHistoryNext(struct linenoiseState *l, int dir) {
             int cur_buf_len = strlen(l->zbuf);
             int cur_history_index = 0;
             int old_zindex = l->zindex;
+            int is_find = 0;
             if (dir == LINENOISE_HISTORY_NEXT) {
                 for (cur_history_index = old_zindex+1; cur_history_index != old_zindex; cur_history_index++) {
                     if (cur_history_index >= history_len)
                         cur_history_index = 0;
                     if (strncmp(l->zbuf, history[cur_history_index], cur_buf_len) == 0) {
                         l->zindex = cur_history_index;
+                        is_find = 1;
                         break;
                     }
                 }
@@ -737,13 +739,20 @@ void linenoiseEditHistoryNext(struct linenoiseState *l, int dir) {
                         cur_history_index = history_len-1;
                     if (strncmp(l->zbuf, history[cur_history_index], cur_buf_len) == 0) {
                         l->zindex = cur_history_index;
+                        is_find = 1;
                         break;
                     }
                 }
             }
-            strncpy(l->buf,history[cur_history_index],l->buflen);
-            l->buf[l->buflen-1] = '\0';
-            l->len = l->pos = strlen(l->buf);
+            if (is_find) {
+                strncpy(l->buf,history[cur_history_index],l->buflen);
+                l->buf[l->buflen-1] = '\0';
+                l->len = l->pos = strlen(l->buf);
+            } else {
+                strncpy(l->buf,l->zbuf,l->buflen);
+                l->buf[l->buflen-1] = '\0';
+                l->len = l->pos = strlen(l->buf);
+            }
         }
         refreshLine(l);
     }
