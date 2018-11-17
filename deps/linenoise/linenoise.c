@@ -722,7 +722,7 @@ void linenoiseEditHistoryNext(struct linenoiseState *l, int dir) {
             int cur_buf_len = strlen(l->zbuf);
             int cur_history_index = 0;
             int old_zindex = l->zindex;
-            if (dir == LINENOISE_HISTORY_PREV) {
+            if (dir == LINENOISE_HISTORY_NEXT) {
                 for (cur_history_index = old_zindex+1; cur_history_index != old_zindex; cur_history_index++) {
                     if (cur_history_index >= history_len)
                         cur_history_index = 0;
@@ -731,7 +731,7 @@ void linenoiseEditHistoryNext(struct linenoiseState *l, int dir) {
                         break;
                     }
                 }
-            } else if (dir == LINENOISE_HISTORY_NEXT) {
+            } else if (dir == LINENOISE_HISTORY_PREV) {
                 for (cur_history_index = old_zindex-1; cur_history_index != old_zindex; cur_history_index--) {
                     if (cur_history_index < 0)
                         cur_history_index = history_len-1;
